@@ -12,7 +12,11 @@ import (
 
 const query = `query($after: String, $filter: String!) {
   orders(first: 9, after: $after, query: $filter) {
-    edges { node { lineItems(first: 100) { edges { node { title variantTitle quantity } } } } }
+    edges { node {
+      name
+      customer { displayName }
+      lineItems(first: 100) { edges { node { title variantTitle quantity } } }
+    } }
     pageInfo { hasNextPage endCursor }
   }
 }`
@@ -22,6 +26,10 @@ type gqlResponse struct {
 		Orders struct {
 			Edges []struct {
 				Node struct {
+					Name     string `json:"name"`
+					Customer *struct {
+						DisplayName string `json:"displayName"`
+					} `json:"customer"`
 					LineItems struct {
 						Edges []struct {
 							Node struct {
@@ -53,9 +61,16 @@ type Item struct {
 	Quantity int    `json:"quantity"`
 }
 
+type Order struct {
+	Number   string `json:"number"`
+	Customer string `json:"customer"`
+	Items    []Item `json:"items"`
+}
+
 type Summary struct {
-	Items      []Item `json:"items"`
-	OrderCount int    `json:"orderCount"`
+	Items      []Item  `json:"items"`
+	Orders     []Order `json:"orders"`
+	OrderCount int     `json:"orderCount"`
 }
 
 type Client struct {
@@ -137,7 +152,7 @@ func (c *Client) FetchSummary(ctx context.Context, days int) (*Summary, error) {
 
 	type key struct{ title, variant string }
 	totals := map[key]int{}
-	orderCount := 0
+	orders := []Order{}
 	var cursor *string
 
 	for {
@@ -147,10 +162,19 @@ func (c *Client) FetchSummary(ctx context.Context, days int) (*Summary, error) {
 		}
 
 		for _, o := range resp.Data.Orders.Edges {
-			orderCount++
+			ord := Order{Number: o.Node.Name}
+			if o.Node.Customer != nil {
+				ord.Customer = o.Node.Customer.DisplayName
+			}
 			for _, li := range o.Node.LineItems.Edges {
 				totals[key{li.Node.Title, li.Node.VariantTitle}] += li.Node.Quantity
+				ord.Items = append(ord.Items, Item{
+					Title:    li.Node.Title,
+					Variant:  li.Node.VariantTitle,
+					Quantity: li.Node.Quantity,
+				})
 			}
+			orders = append(orders, ord)
 		}
 
 		if !resp.Data.Orders.PageInfo.HasNextPage {
@@ -171,5 +195,5 @@ func (c *Client) FetchSummary(ctx context.Context, days int) (*Summary, error) {
 		return items[i].Variant < items[j].Variant
 	})
 
-	return &Summary{Items: items, OrderCount: orderCount}, nil
+	return &Summary{Items: items, Orders: orders, OrderCount: len(orders)}, nil
 }

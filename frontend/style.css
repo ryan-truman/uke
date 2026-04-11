@@ -29,6 +29,18 @@ main {
   justify-content: center;
   padding: 88px 16px 48px;
 }
+main:has(.settings-card) { align-items: center; padding: 16px; }
+
+.settings-card form { align-items: center; }
+.settings-card label { width: 100%; }
+.settings-card .btn-primary { align-self: center; }
+#app {
+  width: 100%;
+  max-width: 680px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
 
 .card {
   background: var(--surface);
@@ -209,6 +221,8 @@ thead th {
   border-bottom: 1px solid var(--border);
 }
 .qty-col, .qty { text-align: right; }
+.order-num { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.order-table td { vertical-align: top; }
 tbody tr:not(:last-child) td { border-bottom: 1px solid var(--border); }
 tbody td { padding: 14px 12px; font-size: 15px; }
 .qty { font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -234,10 +248,11 @@ thead th:last-child { border-left: 1px solid var(--border); }
 .error-actions { display: flex; justify-content: center; gap: 8px; }
 
 @media print {
-  @page { margin: 16mm; }
-  body { background: #fff; color: #000; }
-  .btn-back, .btn-download, .date-select { display: none !important; }
+  @page { margin: 0; size: auto; }
+  body { background: #fff; color: #000; padding: 16mm; }
+  .btn-back, .btn-download, .date-select, .card-logo { display: none !important; }
   main { padding: 0 !important; }
+  #app { gap: 16mm; }
   .card {
     background: #fff;
     color: #000;

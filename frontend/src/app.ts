@@ -1,6 +1,10 @@
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+
 interface Credentials { shop: string; token: string }
 interface Item { title: string; variant: string; quantity: number }
-interface Summary { items: Item[]; orderCount: number }
+interface Order { number: string; customer: string; items: Item[] }
+interface Summary { items: Item[]; orders: Order[]; orderCount: number }
 
 const grinds: { label: string; match: RegExp }[] = [
   { label: 'Espresso',     match: /espresso/i },
@@ -59,9 +63,8 @@ async function load() {
 function showSettings() {
   const creds = loadCreds();
   app.innerHTML = `
-    <div class="card">
+    <div class="card settings-card">
       <div class="card-logo"><img src="logo.png" alt="Uke Coffee" /></div>
-      <h2>Shopify Connection</h2>
       <p class="hint">Enter your shop domain and a custom app access token with <code>read_orders</code> scope.</p>
       <form id="f">
         <label>Shop domain
@@ -92,6 +95,45 @@ function showLoading() {
 
 const backArrow = `<button id="b" class="btn-back" aria-label="Back">←</button>`;
 const downloadBtn = `<button id="dl" class="btn-download" aria-label="Download PDF">Download</button>`;
+
+function download(data: Summary) {
+  const d = new Date();
+  const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const pivoted = pivot(data.items);
+  const activeCols = grinds.map((_, i) => pivoted.some(r => r.cells[i] > 0));
+  const visibleGrinds = grinds.filter((_, i) => activeCols[i]);
+
+  autoTable(doc, {
+    startY: 48,
+    head: [['Product', ...visibleGrinds.map(g => g.label), 'Total']],
+    body: pivoted.map(r => [
+      r.title,
+      ...r.cells.filter((_, i) => activeCols[i]).map(n => n ? String(n) : ''),
+      String(r.total),
+    ]),
+    styles: { font: 'helvetica', fontSize: 10 },
+    headStyles: { fillColor: [20, 20, 20] },
+  });
+
+  autoTable(doc, {
+    startY: (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 24,
+    head: [['Order', 'Customer', 'Products']],
+    body: data.orders.map(o => [
+      o.number,
+      o.customer || '—',
+      o.items.map(i =>
+        `${i.title}${i.variant ? ' — ' + i.variant : ''}${i.quantity > 1 ? ' ×' + i.quantity : ''}`
+      ).join('\n'),
+    ]),
+    styles: { font: 'helvetica', fontSize: 10, cellPadding: 6 },
+    headStyles: { fillColor: [20, 20, 20] },
+    columnStyles: { 0: { cellWidth: 60 }, 1: { cellWidth: 120 } },
+  });
+
+  doc.save(`uke-${stamp}.pdf`);
+}
 
 // Extracts grams from a variant string. "1kg" → 1000, "250g" → 250, null if none.
 function parseWeight(variant: string): number | null {
@@ -143,6 +185,16 @@ function showSummary(data: Summary) {
   const options = ranges
     .map(r => `<option value="${r.value}"${r.value === currentDays ? ' selected' : ''}>${r.label}</option>`)
     .join('');
+  const orderRows = data.orders.length === 0
+    ? `<tr><td colspan="3" class="empty">No unfulfilled orders</td></tr>`
+    : data.orders.map(o => `
+        <tr>
+          <td class="order-num">${esc(o.number)}</td>
+          <td>${esc(o.customer || '—')}</td>
+          <td>${o.items.map(i =>
+            `${esc(i.title)}${i.variant ? ' — ' + esc(i.variant) : ''}${i.quantity > 1 ? ' ×' + i.quantity : ''}`
+          ).join('<br>')}</td>
+        </tr>`).join('');
   app.innerHTML = `
     ${backArrow}
     ${downloadBtn}
@@ -163,9 +215,22 @@ function showSummary(data: Summary) {
         </thead>
         <tbody>${rows}</tbody>
       </table>
+    </div>
+    <div class="card">
+      <h2>Order details</h2>
+      <table class="order-table">
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Customer</th>
+            <th>Products</th>
+          </tr>
+        </thead>
+        <tbody>${orderRows}</tbody>
+      </table>
     </div>`;
   $('b').addEventListener('click', showSettings);
-  $('dl').addEventListener('click', () => window.print());
+  $('dl').addEventListener('click', () => download(data));
   $('d').addEventListener('change', e => {
     currentDays = parseInt((e.target as HTMLSelectElement).value, 10);
     load();

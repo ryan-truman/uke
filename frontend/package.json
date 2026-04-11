@@ -1,10 +1,14 @@
 {
   "private": true,
   "scripts": {
-    "build": "esbuild src/app.ts --bundle --outfile=dist/bundle.js --platform=browser",
+    "build": "esbuild src/app.ts --bundle --minify --outfile=dist/bundle.js --platform=browser",
     "watch": "esbuild src/app.ts --bundle --outfile=dist/bundle.js --platform=browser --watch"
   },
   "devDependencies": {
     "esbuild": "^0.24.0"
+  },
+  "dependencies": {
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7"
   }
 }

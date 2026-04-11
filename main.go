@@ -95,7 +95,21 @@ func mockOrdersHandler(w http.ResponseWriter, _ *http.Request) {
 			{Title: "Dragon Ball", Variant: "250g / Whole Bean", Quantity: 4},
 			{Title: "Dragon Ball", Variant: "1kg / Whole Bean", Quantity: 2},
 		},
-		OrderCount: 14,
+		Orders: []shopify.Order{
+			{Number: "#1042", Customer: "Ada Lovelace", Items: []shopify.Item{
+				{Title: "Chicharito", Variant: "250g / Espresso", Quantity: 2},
+				{Title: "Passion", Variant: "200g / Whole Bean", Quantity: 1},
+			}},
+			{Number: "#1043", Customer: "Grace Hopper", Items: []shopify.Item{
+				{Title: "Dragon Ball", Variant: "1kg / Whole Bean", Quantity: 1},
+			}},
+			{Number: "#1044", Customer: "Alan Turing", Items: []shopify.Item{
+				{Title: "Chicharito", Variant: "250g / Filter", Quantity: 3},
+				{Title: "Dragon Ball", Variant: "250g / Espresso", Quantity: 2},
+				{Title: "Passion", Variant: "1kg / Filter", Quantity: 1},
+			}},
+		},
+		OrderCount: 3,
 	})
 }
 
