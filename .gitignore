@@ -1,0 +1,15 @@
+# Build artifacts
+/dist/
+/frontend/dist/
+
+# Dependencies
+/frontend/node_modules/
+
+# Local Claude config
+/.claude/
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
