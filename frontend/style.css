@@ -129,7 +129,7 @@ input:focus { border-color: var(--text); }
   border-color: var(--border);
 }
 .btn-secondary:hover { border-color: var(--text); }
-.btn-back, .btn-download {
+.btn-top {
   position: fixed;
   top: 20px;
   z-index: 10;
@@ -139,6 +139,8 @@ input:focus { border-color: var(--text); }
   border-radius: 3px;
   cursor: pointer;
   height: 36px;
+  padding: 0 14px;
+  font-size: 14px;
   line-height: 1;
   display: flex;
   align-items: center;
@@ -146,18 +148,10 @@ input:focus { border-color: var(--text); }
   transition: border-color .15s, color .15s;
   font-family: inherit;
 }
-.btn-back {
-  left: 20px;
-  width: 36px;
-  font-size: 24px;
-  font-weight: 700;
-}
-.btn-download {
-  right: 20px;
-  padding: 0 14px;
-  font-size: 14px;
-}
-.btn-back:hover, .btn-download:hover { border-color: var(--text); }
+.btn-settings { left: 20px; }
+.btn-refresh { left: 50%; transform: translateX(-50%); }
+.btn-download { right: 20px; }
+.btn-top:hover { border-color: var(--text); }
 
 .date-select {
   background: var(--bg);
@@ -226,8 +220,8 @@ thead th {
 tbody tr:not(:last-child) td { border-bottom: 1px solid var(--border); }
 tbody td { padding: 14px 12px; font-size: 15px; }
 .qty { font-weight: 700; font-variant-numeric: tabular-nums; }
-.qty.total { border-left: 1px solid var(--border); color: var(--text); }
-thead th:last-child { border-left: 1px solid var(--border); }
+.qty.total { border-right: 1px solid var(--border); color: var(--text); }
+thead th:nth-child(2) { border-right: 1px solid var(--border); }
 .empty {
   text-align: center;
   color: var(--muted);
@@ -250,7 +244,7 @@ thead th:last-child { border-left: 1px solid var(--border); }
 @media print {
   @page { margin: 0; size: auto; }
   body { background: #fff; color: #000; padding: 16mm; }
-  .btn-back, .btn-download, .date-select, .card-logo { display: none !important; }
+  .btn-top, .date-select, .card-logo { display: none !important; }
   main { padding: 0 !important; }
   #app { gap: 16mm; }
   .card {
@@ -263,5 +257,5 @@ thead th:last-child { border-left: 1px solid var(--border); }
   .order-count { color: #555; }
   thead th { color: #555; border-bottom-color: #000; }
   tbody tr:not(:last-child) td { border-bottom-color: #ccc; }
-  .qty.total, thead th:last-child { border-left-color: #000; }
+  .qty.total, thead th:nth-child(2) { border-right-color: #000; }
 }

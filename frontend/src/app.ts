@@ -18,13 +18,6 @@ const grinds: { label: string; match: RegExp }[] = [
 const $ = (id: string) => document.getElementById(id)!;
 const app = $('app');
 
-const ranges: { value: number; label: string }[] = [
-  { value: 1,  label: 'Past day' },
-  { value: 7,  label: 'Past week' },
-  { value: 30, label: 'Past month' },
-  { value: 0,  label: 'All time' },
-];
-let currentDays = 7;
 
 const loadCreds = (): Credentials | null => {
   const shop = localStorage.getItem('uke_shop');
@@ -41,7 +34,7 @@ const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 async function fetchOrders(c: Credentials): Promise<Summary> {
-  const resp = await fetch(`/api/orders?days=${currentDays}`, {
+  const resp = await fetch('/api/orders', {
     headers: { 'X-Shopify-Shop': c.shop, 'X-Shopify-Token': c.token },
   });
   const body = await resp.json();
@@ -93,8 +86,9 @@ function showLoading() {
     </div>`;
 }
 
-const backArrow = `<button id="b" class="btn-back" aria-label="Back">←</button>`;
-const downloadBtn = `<button id="dl" class="btn-download" aria-label="Download PDF">Download</button>`;
+const settingsBtn = `<button id="b" class="btn-top btn-settings" aria-label="Settings">Settings</button>`;
+const refreshBtn = `<button id="rf" class="btn-top btn-refresh" aria-label="Refresh">Refresh</button>`;
+const downloadBtn = `<button id="dl" class="btn-top btn-download" aria-label="Download PDF">Download</button>`;
 
 function download(data: Summary) {
   const d = new Date();
@@ -107,11 +101,11 @@ function download(data: Summary) {
 
   autoTable(doc, {
     startY: 48,
-    head: [['Product', ...visibleGrinds.map(g => g.label), 'Total']],
+    head: [['Product', 'Total', ...visibleGrinds.map(g => g.label)]],
     body: pivoted.map(r => [
       r.title,
-      ...r.cells.filter((_, i) => activeCols[i]).map(n => n ? String(n) : ''),
       String(r.total),
+      ...r.cells.filter((_, i) => activeCols[i]).map(n => n ? String(n) : ''),
     ]),
     styles: { font: 'helvetica', fontSize: 10 },
     headStyles: { fillColor: [20, 20, 20] },
@@ -179,12 +173,9 @@ function showSummary(data: Summary) {
     : pivoted.map(r => `
         <tr>
           <td>${esc(r.title)}</td>
-          ${r.cells.filter((_, i) => activeCols[i]).map(n => `<td class="qty">${n || ''}</td>`).join('')}
           <td class="qty total">${r.total}</td>
+          ${r.cells.filter((_, i) => activeCols[i]).map(n => `<td class="qty">${n || ''}</td>`).join('')}
         </tr>`).join('');
-  const options = ranges
-    .map(r => `<option value="${r.value}"${r.value === currentDays ? ' selected' : ''}>${r.label}</option>`)
-    .join('');
   const orderRows = data.orders.length === 0
     ? `<tr><td colspan="3" class="empty">No unfulfilled orders</td></tr>`
     : data.orders.map(o => `
@@ -196,21 +187,21 @@ function showSummary(data: Summary) {
           ).join('<br>')}</td>
         </tr>`).join('');
   app.innerHTML = `
-    ${backArrow}
+    ${settingsBtn}
+    ${refreshBtn}
     ${downloadBtn}
     <div class="card">
       <div class="card-logo"><img src="logo.png" alt="Uke Coffee" /></div>
       <div class="summary-header">
         <h2>Unfulfilled orders</h2>
         <p class="order-count">${data.orderCount} order${data.orderCount === 1 ? '' : 's'}</p>
-        <select id="d" class="date-select" aria-label="Date range">${options}</select>
       </div>
       <table>
         <thead>
           <tr>
             <th>Product</th>
-            ${headerCells}
             <th class="qty-col">Total</th>
+            ${headerCells}
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -230,16 +221,13 @@ function showSummary(data: Summary) {
       </table>
     </div>`;
   $('b').addEventListener('click', showSettings);
+  $('rf').addEventListener('click', load);
   $('dl').addEventListener('click', () => download(data));
-  $('d').addEventListener('change', e => {
-    currentDays = parseInt((e.target as HTMLSelectElement).value, 10);
-    load();
-  });
 }
 
 function showError(message: string) {
   app.innerHTML = `
-    ${backArrow}
+    ${settingsBtn}
     <div class="card error-card">
       <h2>Something went wrong</h2>
       <p class="error-msg">${esc(message)}</p>
