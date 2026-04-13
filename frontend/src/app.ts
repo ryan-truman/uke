@@ -99,28 +99,82 @@ const settingsBtn = `<button id="b" class="btn-top btn-settings" aria-label="Set
 const refreshBtn = `<button id="rf" class="btn-top btn-refresh" aria-label="Refresh">Refresh</button>`;
 const downloadBtn = `<button id="dl" class="btn-top btn-download" aria-label="Download PDF">Download</button>`;
 
-function download(data: Summary) {
+async function download(data: Summary) {
   const d = new Date();
   const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+  const BG: [number, number, number]        = [10, 10, 10];
+  const SURFACE: [number, number, number]   = [20, 20, 20];
+  const BORDER: [number, number, number]    = [42, 42, 42];
+  const TEXT: [number, number, number]      = [245, 245, 245];
+  const MUTED: [number, number, number]     = [138, 138, 138];
+
+  const darkTable = {
+    styles:             { font: 'helvetica', fontSize: 10, textColor: TEXT, lineColor: BORDER, lineWidth: 0.5 },
+    headStyles:         { fillColor: SURFACE, textColor: TEXT, fontStyle: 'bold' as const },
+    bodyStyles:         { fillColor: BG, textColor: TEXT },
+    alternateRowStyles: { fillColor: BG },
+    footStyles:         { fillColor: BG, textColor: MUTED },
+  };
+
+  // Fetch logo as data URL
+  const logoDataUrl = await fetch('/logo.png')
+    .then(r => r.blob())
+    .then(b => new Promise<string>(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.readAsDataURL(b);
+    }));
+  const logoImg = new Image();
+  logoImg.src = logoDataUrl;
+  await new Promise(r => { logoImg.onload = r; });
+
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  // Dark page background
+  doc.setFillColor(...BG);
+  doc.rect(0, 0, pageWidth, doc.internal.pageSize.getHeight(), 'F');
+
+  // Logo
+  const logoH = 72;
+  const logoW = (logoImg.naturalWidth / logoImg.naturalHeight) * logoH;
+  doc.addImage(logoDataUrl, 'PNG', (pageWidth - logoW) / 2, 28, logoW, logoH);
+
+  // "Until Victory" heading
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(...TEXT);
+  doc.text('Until Victory', pageWidth / 2, 28 + logoH + 20, { align: 'center' });
+
   const pivoted = pivot(data.items);
   const activeCols = grinds.map((_, i) => pivoted.some(r => r.cells[i] > 0));
   const visibleGrinds = grinds.filter((_, i) => activeCols[i]);
 
   autoTable(doc, {
-    startY: 48,
-    head: [['Product', 'Total', ...visibleGrinds.map(g => g.label)]],
+    ...darkTable,
+    startY: 28 + logoH + 40,
+    head: [['Coffee', 'Total', ...visibleGrinds.map(g => g.label)]],
     body: pivoted.map(r => [
       r.title,
       String(r.total),
       ...r.cells.filter((_, i) => activeCols[i]).map(n => n ? String(n) : ''),
     ]),
-    styles: { font: 'helvetica', fontSize: 10 },
-    headStyles: { fillColor: [20, 20, 20] },
   });
 
+  const drip = ukeDrip(data.orders);
+  if (drip.length > 0) {
+    autoTable(doc, {
+      ...darkTable,
+      startY: (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 24,
+      head: [['Merch', 'Size', 'Qty']],
+      body: drip.map(d => [d.title, d.size, String(d.quantity)]),
+      columnStyles: { 1: { cellWidth: 60 }, 2: { cellWidth: 40, halign: 'right' as const } },
+    });
+  }
+
   autoTable(doc, {
+    ...darkTable,
     startY: (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 24,
     head: [['Order', 'Products']],
     body: data.orders.map(o => [
@@ -129,8 +183,10 @@ function download(data: Summary) {
         `${i.title}${i.variant ? ' — ' + i.variant : ''}${i.quantity > 1 ? ' ×' + i.quantity : ''}`
       ).join('\n'),
     ]),
-    styles: { font: 'helvetica', fontSize: 10, cellPadding: 6 },
-    headStyles: { fillColor: [20, 20, 20] },
+    styles: { ...darkTable.styles, cellPadding: 6 },
+    headStyles: darkTable.headStyles,
+    bodyStyles: darkTable.bodyStyles,
+    alternateRowStyles: darkTable.alternateRowStyles,
     columnStyles: { 0: { cellWidth: 60 } },
   });
 
@@ -227,7 +283,7 @@ function showSummary(data: Summary) {
       <div class="card-logo"><img src="logo.png" alt="Uke Coffee" /></div>
       <div class="summary-header">
         <h2>Until Victory</h2>
-        <p class="order-count">${data.orderCount} order${data.orderCount === 1 ? '' : 's'}</p>
+        <p class="order-count">Coffee Summary</p>
       </div>
       <table>
         <thead>
@@ -240,6 +296,7 @@ function showSummary(data: Summary) {
         <tbody>${rows}</tbody>
       </table>
     </div>
+    ${drip.length > 0 ? `
     <div class="card">
       <h2>Uke Drip</h2>
       <table>
@@ -252,7 +309,7 @@ function showSummary(data: Summary) {
         </thead>
         <tbody>${dripRows}</tbody>
       </table>
-    </div>
+    </div>` : ''}
     <div class="card">
       <h2>Order details</h2>
       <table class="order-table">
