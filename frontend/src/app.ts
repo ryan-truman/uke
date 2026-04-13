@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable';
 
 interface Credentials { shop: string; token: string }
 interface Item { title: string; variant: string; quantity: number }
-interface Order { number: string; customer: string; items: Item[] }
+interface Order { number: string; items: Item[] }
 interface Summary { items: Item[]; orders: Order[]; orderCount: number }
 
 const grinds: { label: string; match: RegExp }[] = [
@@ -58,7 +58,6 @@ function showSettings() {
   app.innerHTML = `
     <div class="card settings-card">
       <div class="card-logo"><img src="logo.png" alt="Uke Coffee" /></div>
-      <p class="hint">Enter your shop domain and a custom app access token with <code>read_orders</code> scope.</p>
       <form id="f">
         <label>Shop domain
           <input id="s" type="text" placeholder="my-store.myshopify.com"
@@ -68,13 +67,23 @@ function showSettings() {
           <input id="t" type="password" placeholder="shpat_…"
             value="${esc(creds?.token ?? '')}" required autocomplete="off" />
         </label>
-        <button type="submit" class="btn-primary">Save &amp; load orders</button>
+        <div class="settings-actions">
+          ${loadCreds() ? `<button type="button" id="clr" class="btn-danger">Clear saved data</button>` : '<div></div>'}
+          <button type="submit" class="btn-primary">Save &amp; load orders</button>
+        </div>
       </form>
     </div>`;
   $('f').addEventListener('submit', e => {
     e.preventDefault();
-    saveCreds({ shop: ($ ('s') as HTMLInputElement).value.trim(), token: ($('t') as HTMLInputElement).value.trim() });
+    saveCreds({ shop: ($('s') as HTMLInputElement).value.trim(), token: ($('t') as HTMLInputElement).value.trim() });
     load();
+  });
+  document.getElementById('clr')?.addEventListener('click', () => {
+    if (confirm('Are you sure? This will remove your Access Token and you will not be able to retrieve order information until you enter a new one.')) {
+      localStorage.removeItem('uke_shop');
+      localStorage.removeItem('uke_token');
+      showSettings();
+    }
   });
 }
 
@@ -82,7 +91,7 @@ function showLoading() {
   app.innerHTML = `
     <div class="card loading-card">
       <div class="spinner"></div>
-      <p>Fetching unfulfilled orders…</p>
+      <p>Fetching orders…</p>
     </div>`;
 }
 
@@ -113,17 +122,16 @@ function download(data: Summary) {
 
   autoTable(doc, {
     startY: (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 24,
-    head: [['Order', 'Customer', 'Products']],
+    head: [['Order', 'Products']],
     body: data.orders.map(o => [
       o.number,
-      o.customer || '—',
       o.items.map(i =>
         `${i.title}${i.variant ? ' — ' + i.variant : ''}${i.quantity > 1 ? ' ×' + i.quantity : ''}`
       ).join('\n'),
     ]),
     styles: { font: 'helvetica', fontSize: 10, cellPadding: 6 },
     headStyles: { fillColor: [20, 20, 20] },
-    columnStyles: { 0: { cellWidth: 60 }, 1: { cellWidth: 120 } },
+    columnStyles: { 0: { cellWidth: 60 } },
   });
 
   doc.save(`uke-${stamp}.pdf`);
@@ -162,6 +170,22 @@ function pivot(items: Item[]): { title: string; cells: number[]; total: number }
     .sort((a, b) => b.total - a.total || a.title.localeCompare(b.title));
 }
 
+const clothingSize = /^(XS|S|M|L|XL|XXL|2XL|3XL)$/i;
+
+function ukeDrip(orders: Order[]): { title: string; size: string; quantity: number }[] {
+  const totals = new Map<string, number>();
+  for (const o of orders) {
+    for (const i of o.items) {
+      if (!clothingSize.test(i.variant?.trim() ?? '')) continue;
+      const k = `${i.title}||${i.variant.trim().toUpperCase()}`;
+      totals.set(k, (totals.get(k) ?? 0) + i.quantity);
+    }
+  }
+  return Array.from(totals.entries())
+    .map(([k, quantity]) => { const [title, size] = k.split('||'); return { title, size, quantity }; })
+    .sort((a, b) => a.title.localeCompare(b.title) || a.size.localeCompare(b.size));
+}
+
 function showSummary(data: Summary) {
   const pivoted = pivot(data.items);
   // Only show grind columns where at least one product has a non-zero count.
@@ -177,15 +201,24 @@ function showSummary(data: Summary) {
           ${r.cells.filter((_, i) => activeCols[i]).map(n => `<td class="qty">${n || ''}</td>`).join('')}
         </tr>`).join('');
   const orderRows = data.orders.length === 0
-    ? `<tr><td colspan="3" class="empty">No unfulfilled orders</td></tr>`
+    ? `<tr><td colspan="2" class="empty">No unfulfilled orders</td></tr>`
     : data.orders.map(o => `
         <tr>
           <td class="order-num">${esc(o.number)}</td>
-          <td>${esc(o.customer || '—')}</td>
           <td>${o.items.map(i =>
             `${esc(i.title)}${i.variant ? ' — ' + esc(i.variant) : ''}${i.quantity > 1 ? ' ×' + i.quantity : ''}`
           ).join('<br>')}</td>
         </tr>`).join('');
+  const drip = ukeDrip(data.orders);
+  const dripRows = drip.length === 0
+    ? `<tr><td colspan="3" class="empty">No clothing items</td></tr>`
+    : drip.map(d => `
+        <tr>
+          <td>${esc(d.title)}</td>
+          <td class="qty-col">${esc(d.size)}</td>
+          <td class="qty">${d.quantity}</td>
+        </tr>`).join('');
+
   app.innerHTML = `
     ${settingsBtn}
     ${refreshBtn}
@@ -193,7 +226,7 @@ function showSummary(data: Summary) {
     <div class="card">
       <div class="card-logo"><img src="logo.png" alt="Uke Coffee" /></div>
       <div class="summary-header">
-        <h2>Unfulfilled orders</h2>
+        <h2>Until Victory</h2>
         <p class="order-count">${data.orderCount} order${data.orderCount === 1 ? '' : 's'}</p>
       </div>
       <table>
@@ -208,12 +241,24 @@ function showSummary(data: Summary) {
       </table>
     </div>
     <div class="card">
+      <h2>Uke Drip</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th class="qty-col">Size</th>
+            <th class="qty-col">Qty</th>
+          </tr>
+        </thead>
+        <tbody>${dripRows}</tbody>
+      </table>
+    </div>
+    <div class="card">
       <h2>Order details</h2>
       <table class="order-table">
         <thead>
           <tr>
             <th>Order</th>
-            <th>Customer</th>
             <th>Products</th>
           </tr>
         </thead>

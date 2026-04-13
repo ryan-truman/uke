@@ -14,7 +14,6 @@ const query = `query($after: String, $filter: String!) {
   orders(first: 9, after: $after, query: $filter) {
     edges { node {
       name
-      customer { displayName }
       lineItems(first: 100) { edges { node { title variantTitle quantity } } }
     } }
     pageInfo { hasNextPage endCursor }
@@ -26,10 +25,7 @@ type gqlResponse struct {
 		Orders struct {
 			Edges []struct {
 				Node struct {
-					Name     string `json:"name"`
-					Customer *struct {
-						DisplayName string `json:"displayName"`
-					} `json:"customer"`
+					Name      string `json:"name"`
 					LineItems struct {
 						Edges []struct {
 							Node struct {
@@ -62,9 +58,8 @@ type Item struct {
 }
 
 type Order struct {
-	Number   string `json:"number"`
-	Customer string `json:"customer"`
-	Items    []Item `json:"items"`
+	Number string `json:"number"`
+	Items  []Item `json:"items"`
 }
 
 type Summary struct {
@@ -144,7 +139,7 @@ func (c *Client) fetchPage(ctx context.Context, cursor *string, filter string) (
 // days (0 means no date filter) and returns aggregated product totals sorted
 // by quantity descending.
 func (c *Client) FetchSummary(ctx context.Context, days int) (*Summary, error) {
-	filter := "fulfillment_status:unfulfilled"
+	filter := "fulfillment_status:unshipped financial_status:paid"
 	if days > 0 {
 		since := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
 		filter += " created_at:>=" + since
@@ -163,9 +158,6 @@ func (c *Client) FetchSummary(ctx context.Context, days int) (*Summary, error) {
 
 		for _, o := range resp.Data.Orders.Edges {
 			ord := Order{Number: o.Node.Name}
-			if o.Node.Customer != nil {
-				ord.Customer = o.Node.Customer.DisplayName
-			}
 			for _, li := range o.Node.LineItems.Edges {
 				totals[key{li.Node.Title, li.Node.VariantTitle}] += li.Node.Quantity
 				ord.Items = append(ord.Items, Item{
