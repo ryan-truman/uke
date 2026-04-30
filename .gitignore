@@ -8,6 +8,12 @@
 # Local Claude config
 /.claude/
 
+# Local config — never commit credentials
+.env
+
+# Shopify token cache
+.tokens.json
+
 # Editor / OS
 .DS_Store
 *.swp

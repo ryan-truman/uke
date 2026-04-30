@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -68,21 +71,166 @@ type Summary struct {
 	OrderCount int     `json:"orderCount"`
 }
 
-type Client struct {
-	http  *http.Client
-	shop  string
-	token string
+type tokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
 }
 
-func NewClient(shop, token string) *Client {
+type TokenData struct {
+	AccessToken  string    `json:"access_token"`
+	RefreshToken string    `json:"refresh_token"`
+	ExpiresAt    time.Time `json:"expires_at"`
+}
+
+// TokenManager fetches and refreshes Shopify access tokens automatically.
+// filePath is optional — if empty, tokens are kept in memory only.
+type TokenManager struct {
+	shop         string
+	clientID     string
+	clientSecret string
+	filePath     string
+	data         *TokenData
+	mu           sync.Mutex
+}
+
+func NewTokenManager(shop, clientID, clientSecret, filePath string) *TokenManager {
+	return &TokenManager{
+		shop:         shop,
+		clientID:     clientID,
+		clientSecret: clientSecret,
+		filePath:     filePath,
+	}
+}
+
+// Load initialises the token manager. It reads a cached token from disk if a
+// filePath was provided and the token is still valid; otherwise it fetches a
+// fresh one via the client_credentials grant.
+func (m *TokenManager) Load() error {
+	if m.filePath != "" {
+		raw, err := os.ReadFile(m.filePath)
+		if err == nil {
+			var td TokenData
+			if json.Unmarshal(raw, &td) == nil && td.AccessToken != "" {
+				m.data = &td
+				if time.Until(td.ExpiresAt) > 5*time.Minute {
+					return nil
+				}
+				if td.RefreshToken != "" {
+					if err := m.refresh(); err == nil {
+						return nil
+					}
+				}
+			}
+		}
+	}
+	return m.fetchNew()
+}
+
+// EnsureValid returns a valid access token, refreshing if within 5 min of
+// expiry. Safe for concurrent use.
+func (m *TokenManager) EnsureValid() (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.data == nil {
+		return "", fmt.Errorf("token manager not loaded")
+	}
+	if time.Until(m.data.ExpiresAt) < 5*time.Minute {
+		if m.data.RefreshToken != "" {
+			if err := m.refresh(); err == nil {
+				return m.data.AccessToken, nil
+			}
+		}
+		if err := m.fetchNew(); err != nil {
+			return "", err
+		}
+	}
+	return m.data.AccessToken, nil
+}
+
+func (m *TokenManager) fetchNew() error {
+	return m.postToken(url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {m.clientID},
+		"client_secret": {m.clientSecret},
+	})
+}
+
+func (m *TokenManager) refresh() error {
+	return m.postToken(url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {m.clientID},
+		"client_secret": {m.clientSecret},
+		"refresh_token": {m.data.RefreshToken},
+	})
+}
+
+func (m *TokenManager) postToken(vals url.Values) error {
+	resp, err := http.PostForm(
+		fmt.Sprintf("https://%s/admin/oauth/access_token", m.shop),
+		vals,
+	)
+	if err != nil {
+		return fmt.Errorf("shopify token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("shopify token: HTTP %d", resp.StatusCode)
+	}
+
+	var tr tokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+		return fmt.Errorf("shopify token decode: %w", err)
+	}
+	if tr.AccessToken == "" {
+		return fmt.Errorf("shopify token: empty access_token in response")
+	}
+
+	expiresIn := tr.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
+	m.data = &TokenData{
+		AccessToken:  tr.AccessToken,
+		RefreshToken: tr.RefreshToken,
+		ExpiresAt:    time.Now().Add(time.Duration(expiresIn) * time.Second),
+	}
+	return m.save()
+}
+
+func (m *TokenManager) save() error {
+	if m.filePath == "" {
+		return nil
+	}
+	data, err := json.MarshalIndent(m.data, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.filePath, data, 0600)
+}
+
+type Client struct {
+	http   *http.Client
+	shop   string
+	tokens *TokenManager
+}
+
+func NewClient(shop string, tokens *TokenManager) *Client {
 	return &Client{
-		http:  &http.Client{Timeout: 30 * time.Second},
-		shop:  shop,
-		token: token,
+		http:   &http.Client{Timeout: 30 * time.Second},
+		shop:   shop,
+		tokens: tokens,
 	}
 }
 
 func (c *Client) doQuery(ctx context.Context, cursor *string, filter string) (*gqlResponse, error) {
+	token, err := c.tokens.EnsureValid()
+	if err != nil {
+		return nil, err
+	}
+
 	body, err := json.Marshal(map[string]any{
 		"query":     query,
 		"variables": map[string]any{"after": cursor, "filter": filter},
@@ -98,7 +246,7 @@ func (c *Client) doQuery(ctx context.Context, cursor *string, filter string) (*g
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Shopify-Access-Token", c.token)
+	req.Header.Set("X-Shopify-Access-Token", token)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -118,21 +266,24 @@ func (c *Client) doQuery(ctx context.Context, cursor *string, filter string) (*g
 }
 
 func (c *Client) fetchPage(ctx context.Context, cursor *string, filter string) (*gqlResponse, error) {
-	for attempt := range 2 {
-		resp, err := c.doQuery(ctx, cursor, filter)
+	resp, err := c.doQuery(ctx, cursor, filter)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Errors) == 0 {
+		return resp, nil
+	}
+	if resp.Errors[0].Extensions != nil && resp.Errors[0].Extensions.Code == "THROTTLED" {
+		time.Sleep(time.Second)
+		resp, err = c.doQuery(ctx, cursor, filter)
 		if err != nil {
 			return nil, err
 		}
 		if len(resp.Errors) == 0 {
 			return resp, nil
 		}
-		if attempt == 0 && resp.Errors[0].Extensions != nil && resp.Errors[0].Extensions.Code == "THROTTLED" {
-			time.Sleep(time.Second)
-			continue
-		}
-		return nil, fmt.Errorf("shopify: %s", resp.Errors[0].Message)
 	}
-	panic("unreachable")
+	return nil, fmt.Errorf("shopify: %s", resp.Errors[0].Message)
 }
 
 // FetchSummary pages through unfulfilled orders created within the last `days`

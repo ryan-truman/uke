@@ -1,7 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-interface Credentials { shop: string; token: string }
+interface Credentials { shop: string; clientId: string; clientSecret: string }
 interface Item { title: string; variant: string; quantity: number }
 interface Order { number: string; items: Item[] }
 interface Summary { items: Item[]; orders: Order[]; orderCount: number }
@@ -18,16 +18,17 @@ const grinds: { label: string; match: RegExp }[] = [
 const $ = (id: string) => document.getElementById(id)!;
 const app = $('app');
 
-
 const loadCreds = (): Credentials | null => {
   const shop = localStorage.getItem('uke_shop');
-  const token = localStorage.getItem('uke_token');
-  return shop && token ? { shop, token } : null;
+  const clientId = localStorage.getItem('uke_client_id');
+  const clientSecret = localStorage.getItem('uke_client_secret');
+  return shop && clientId && clientSecret ? { shop, clientId, clientSecret } : null;
 };
 
 const saveCreds = (c: Credentials) => {
   localStorage.setItem('uke_shop', c.shop);
-  localStorage.setItem('uke_token', c.token);
+  localStorage.setItem('uke_client_id', c.clientId);
+  localStorage.setItem('uke_client_secret', c.clientSecret);
 };
 
 const esc = (s: string) =>
@@ -35,7 +36,11 @@ const esc = (s: string) =>
 
 async function fetchOrders(c: Credentials): Promise<Summary> {
   const resp = await fetch('/api/orders', {
-    headers: { 'X-Shopify-Shop': c.shop, 'X-Shopify-Token': c.token },
+    headers: {
+      'X-Shopify-Shop': c.shop,
+      'X-Shopify-Client-Id': c.clientId,
+      'X-Shopify-Client-Secret': c.clientSecret,
+    },
   });
   const body = await resp.json();
   if (!resp.ok) throw new Error(body.error ?? `server error ${resp.status}`);
@@ -63,25 +68,34 @@ function showSettings() {
           <input id="s" type="text" placeholder="my-store.myshopify.com"
             value="${esc(creds?.shop ?? '')}" required autocomplete="off" spellcheck="false" />
         </label>
-        <label>Access token
-          <input id="t" type="password" placeholder="shpat_…"
-            value="${esc(creds?.token ?? '')}" required autocomplete="off" />
+        <label>Client ID
+          <input id="ci" type="text" placeholder="Client ID"
+            value="${esc(creds?.clientId ?? '')}" required autocomplete="off" spellcheck="false" />
+        </label>
+        <label>Client secret
+          <input id="cs" type="password" placeholder="Client secret"
+            value="${esc(creds?.clientSecret ?? '')}" required autocomplete="off" />
         </label>
         <div class="settings-actions">
-          ${loadCreds() ? `<button type="button" id="clr" class="btn-danger">Clear saved data</button>` : '<div></div>'}
+          ${creds ? `<button type="button" id="clr" class="btn-danger">Clear saved data</button>` : '<div></div>'}
           <button type="submit" class="btn-primary">Save &amp; load orders</button>
         </div>
       </form>
     </div>`;
   $('f').addEventListener('submit', e => {
     e.preventDefault();
-    saveCreds({ shop: ($('s') as HTMLInputElement).value.trim(), token: ($('t') as HTMLInputElement).value.trim() });
+    saveCreds({
+      shop: ($('s') as HTMLInputElement).value.trim(),
+      clientId: ($('ci') as HTMLInputElement).value.trim(),
+      clientSecret: ($('cs') as HTMLInputElement).value.trim(),
+    });
     load();
   });
   document.getElementById('clr')?.addEventListener('click', () => {
-    if (confirm('Are you sure? This will remove your Access Token and you will not be able to retrieve order information until you enter a new one.')) {
+    if (confirm('Are you sure? This will remove your credentials and you will not be able to retrieve order information until you enter them again.')) {
       localStorage.removeItem('uke_shop');
-      localStorage.removeItem('uke_token');
+      localStorage.removeItem('uke_client_id');
+      localStorage.removeItem('uke_client_secret');
       showSettings();
     }
   });
@@ -200,24 +214,24 @@ function parseWeight(variant: string): number | null {
   return parseFloat(m[1]) * (m[2].toLowerCase() === 'kg' ? 1000 : 1);
 }
 
-function pivot(items: Item[]): { title: string; cells: number[]; total: number }[] {
-  // First pass: per-product base (smallest) bag weight.
-  const baseByTitle = new Map<string, number>();
-  for (const it of items) {
-    const w = parseWeight(it.variant);
-    if (w === null) continue;
-    const cur = baseByTitle.get(it.title);
-    if (cur === undefined || w < cur) baseByTitle.set(it.title, w);
-  }
+// Per-product base bag weight overrides. Matched case-insensitively against the
+// product title. Any product not listed defaults to 200g.
+const productBaseWeights: [RegExp, number][] = [
+  [/chicharito/i, 250],
+];
+const DEFAULT_BASE_WEIGHT_G = 200;
 
-  // Second pass: aggregate bags per (title, grind).
+function baseWeightFor(title: string): number {
+  return productBaseWeights.find(([re]) => re.test(title))?.[1] ?? DEFAULT_BASE_WEIGHT_G;
+}
+
+function pivot(items: Item[]): { title: string; cells: number[]; total: number }[] {
   const byTitle = new Map<string, number[]>();
   for (const it of items) {
     const idx = grinds.findIndex(g => g.match.test(it.variant));
-    if (idx === -1) continue; // skip variants that don't match any grind type
+    if (idx === -1) continue;
     const w = parseWeight(it.variant);
-    const base = baseByTitle.get(it.title);
-    const bags = w !== null && base ? (w / base) * it.quantity : it.quantity;
+    const bags = w !== null ? (w / baseWeightFor(it.title)) * it.quantity : it.quantity;
     if (!byTitle.has(it.title)) byTitle.set(it.title, grinds.map(() => 0));
     byTitle.get(it.title)![idx] += bags;
   }

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"sync"
 
 	"github.com/ryan-truman/uke/internal/shopify"
 )
@@ -18,10 +19,39 @@ import (
 //go:embed frontend/dist
 var frontend embed.FS
 
+var (
+	tokenCacheMu sync.Mutex
+	tokenCache   = map[string]*shopify.TokenManager{}
+)
+
+func getClient(shop, clientID, clientSecret string) (*shopify.Client, error) {
+	key := shop + "\x00" + clientID
+
+	tokenCacheMu.Lock()
+	tm, ok := tokenCache[key]
+	tokenCacheMu.Unlock()
+
+	if !ok {
+		newTM := shopify.NewTokenManager(shop, clientID, clientSecret, "")
+		if err := newTM.Load(); err != nil {
+			return nil, err
+		}
+		tokenCacheMu.Lock()
+		if existing, exists := tokenCache[key]; exists {
+			tm = existing
+		} else {
+			tm = newTM
+			tokenCache[key] = tm
+		}
+		tokenCacheMu.Unlock()
+	}
+
+	return shopify.NewClient(shop, tm), nil
+}
+
 func main() {
 	port := flag.Int("port", 8080, "port to listen on")
 	open := flag.Bool("open", true, "open browser on startup")
-	mock := flag.Bool("mock", false, "serve fake data without calling Shopify")
 	flag.Parse()
 
 	dist, err := fs.Sub(frontend, "frontend/dist")
@@ -30,12 +60,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	if *mock {
-		mux.HandleFunc("GET /api/orders", mockOrdersHandler)
-		log.Println("mock mode: serving fake data")
-	} else {
-		mux.HandleFunc("GET /api/orders", ordersHandler)
-	}
+	mux.HandleFunc("GET /api/orders", ordersHandler)
 	mux.Handle("/", http.FileServer(http.FS(dist)))
 
 	url := fmt.Sprintf("http://localhost:%d", *port)
@@ -48,13 +73,20 @@ func main() {
 
 func ordersHandler(w http.ResponseWriter, r *http.Request) {
 	shop := r.Header.Get("X-Shopify-Shop")
-	token := r.Header.Get("X-Shopify-Token")
-	if shop == "" || token == "" {
+	clientID := r.Header.Get("X-Shopify-Client-Id")
+	clientSecret := r.Header.Get("X-Shopify-Client-Secret")
+	if shop == "" || clientID == "" || clientSecret == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing credentials"})
 		return
 	}
 
-	summary, err := shopify.NewClient(shop, token).FetchSummary(r.Context(), parseDays(r))
+	client, err := getClient(shop, clientID, clientSecret)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	summary, err := client.FetchSummary(r.Context(), parseDays(r))
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -80,37 +112,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
-}
-
-func mockOrdersHandler(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, shopify.Summary{
-		Items: []shopify.Item{
-			{Title: "Chicharito", Variant: "250g / Espresso", Quantity: 12},
-			{Title: "Chicharito", Variant: "250g / Filter", Quantity: 8},
-			{Title: "Chicharito", Variant: "1kg / Whole Bean", Quantity: 4},
-			{Title: "Passion", Variant: "200g / Espresso", Quantity: 6},
-			{Title: "Passion", Variant: "1kg / Filter", Quantity: 2},
-			{Title: "Passion", Variant: "200g / Whole Bean", Quantity: 5},
-			{Title: "Dragon Ball", Variant: "250g / Espresso", Quantity: 9},
-			{Title: "Dragon Ball", Variant: "250g / Whole Bean", Quantity: 4},
-			{Title: "Dragon Ball", Variant: "1kg / Whole Bean", Quantity: 2},
-		},
-		Orders: []shopify.Order{
-			{Number: "#1042", Items: []shopify.Item{
-				{Title: "Chicharito", Variant: "250g / Espresso", Quantity: 2},
-				{Title: "Passion", Variant: "200g / Whole Bean", Quantity: 1},
-			}},
-			{Number: "#1043", Items: []shopify.Item{
-				{Title: "Dragon Ball", Variant: "1kg / Whole Bean", Quantity: 1},
-			}},
-			{Number: "#1044", Items: []shopify.Item{
-				{Title: "Chicharito", Variant: "250g / Filter", Quantity: 3},
-				{Title: "Dragon Ball", Variant: "250g / Espresso", Quantity: 2},
-				{Title: "Passion", Variant: "1kg / Filter", Quantity: 1},
-			}},
-		},
-		OrderCount: 3,
-	})
 }
 
 func openBrowser(url string) {
