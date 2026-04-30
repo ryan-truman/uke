@@ -225,9 +225,30 @@ function baseWeightFor(title: string): number {
   return productBaseWeights.find(([re]) => re.test(title))?.[1] ?? DEFAULT_BASE_WEIGHT_G;
 }
 
+// Contents of the Drop 002 Coffee Pack — one bag of each per unit ordered.
+const DROP_002_COFFEES = [
+  'Dragon Ball - Dragonfruit honey, Colombia',
+  'Chicharito - Washed Anaerobic, Mexico',
+  'Uke Passion - Passionfruit Honey, Colombia',
+];
+
+function expandPacks(items: Item[]): Item[] {
+  const result: Item[] = [];
+  for (const it of items) {
+    if (/^drop 002 coffee pack$/i.test(it.title)) {
+      for (const coffee of DROP_002_COFFEES) {
+        result.push({ title: coffee, variant: it.variant, quantity: it.quantity });
+      }
+    } else {
+      result.push(it);
+    }
+  }
+  return result;
+}
+
 function pivot(items: Item[]): { title: string; cells: number[]; total: number }[] {
   const byTitle = new Map<string, number[]>();
-  for (const it of items) {
+  for (const it of expandPacks(items)) {
     const idx = grinds.findIndex(g => g.match.test(it.variant));
     if (idx === -1) continue;
     const w = parseWeight(it.variant);
