@@ -11,8 +11,9 @@
 # Local config — never commit credentials
 .env
 
-# Shopify token cache
+# Shopify token cache and local data
 .tokens.json
+orders.json
 
 # Editor / OS
 .DS_Store

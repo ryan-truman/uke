@@ -115,7 +115,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func openBrowser(url string) {
-	// Try Chrome/Chromium in app mode first for a native-feeling window.
 	for _, browser := range []string{
 		"google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
 		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -124,7 +123,6 @@ func openBrowser(url string) {
 			return
 		}
 	}
-	// Fallback to default browser.
 	switch runtime.GOOS {
 	case "darwin":
 		exec.Command("open", url).Start()
