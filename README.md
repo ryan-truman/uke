@@ -28,11 +28,11 @@ A fulfilment tool for [Uke Coffee](https://ukecoffee.com/). Pulls the week's unf
 
 ## Challenges
 
-### 1. Pack expansion
+### 1. Multi-pack Handling 
 
-Products like the Drop 002 Coffee Pack represent three individual bags of coffee, but Shopify returns them as a single line item with no metadata indicating what's inside. The app hardcodes the pack contents and manually expands them before aggregating — which means every new bundle product requires a code change to stay accurate.
+Products like the 'Drop 002 Coffee Pack' represent three individual bags of coffee, but Shopify returns them as a single line item with no metadata indicating what's inside. The app hardcodes the pack contents and manually expands them before aggregating — which means every new bundle product requires a code change to stay accurate.
 
-This makes the fulfilment summary brittle. If a new pack is released and the code isn't updated, it will either be missing from the summary entirely or counted incorrectly. On the next product release, the pack definitions will be pulled out into a config file so the app can adapt without a code change.
+This makes the fulfilment summary brittle. If a new pack is released and the code isn't updated, it will be counted as its own product. Prior to the next product release, I will likely pull the pack definitions out into a config file so the app can adapt without a code change.
 
 ### 2. Cross-platform development
 
