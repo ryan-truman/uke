@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "WARNING: gitleaks is not installed — skipping secret scan." >&2
+  echo "         Install it and re-run 'make hooks' to enable protection." >&2
+  exit 0
+fi
+
+if ! git diff --cached | gitleaks detect --pipe --no-banner; then
+  echo "" >&2
+  echo "COMMIT BLOCKED: gitleaks found potential secrets in staged files." >&2
+  echo "Review the findings above, remove or rotate any exposed credentials," >&2
+  echo "then stage your changes again." >&2
+  exit 1
+fi

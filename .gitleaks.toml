@@ -1,0 +1,11 @@
+title = "uke gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Ignore gitignored secret caches"
+paths = [
+  '''\.tokens\.json''',
+  '''orders\.json''',
+]

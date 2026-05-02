@@ -91,8 +91,7 @@ function showSettings() {
     });
     load();
   });
-  document.getElementById('clr')?.addEventListener('click', () => {
-    if (confirm('Are you sure? This will remove your credentials and you will not be able to retrieve order information until you enter them again.')) {
+  document.getElementById('clr')?.addEventListener('click', () => { if (confirm('Are you sure? This will remove your credentials and you will not be able to retrieve order information until you enter them again.')) {
       localStorage.removeItem('uke_shop');
       localStorage.removeItem('uke_client_id');
       localStorage.removeItem('uke_client_secret');
@@ -170,7 +169,7 @@ async function download(data: Summary) {
     startY: 28 + logoH + 40,
     head: [['Coffee', 'Total', ...visibleGrinds.map(g => g.label)]],
     body: pivoted.map(r => [
-      r.title,
+      r.title.split(' - ')[0],
       String(r.total),
       ...r.cells.filter((_, i) => activeCols[i]).map(n => n ? String(n) : ''),
     ]),
@@ -288,7 +287,7 @@ function showSummary(data: Summary) {
     ? `<tr><td colspan="${visibleGrinds.length + 2}" class="empty">No unfulfilled orders</td></tr>`
     : pivoted.map(r => `
         <tr>
-          <td>${esc(r.title)}</td>
+          <td>${esc(r.title.split(' - ')[0])}</td>
           <td class="qty total">${r.total}</td>
           ${r.cells.filter((_, i) => activeCols[i]).map(n => `<td class="qty">${n || ''}</td>`).join('')}
         </tr>`).join('');

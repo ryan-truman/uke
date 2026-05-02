@@ -4,6 +4,11 @@
 
 # Dependencies
 /frontend/node_modules/
+/node_modules/
+
+# Playwright
+/test-results/
+/playwright-report/
 
 # Local Claude config
 /.claude/

@@ -22,35 +22,39 @@ const query = `query($after: String, $filter: String!) {
   }
 }`
 
+type gqlLineItem struct {
+	Title        string `json:"title"`
+	VariantTitle string `json:"variantTitle"`
+	Quantity     int    `json:"quantity"`
+}
+
+type gqlOrder struct {
+	Name      string `json:"name"`
+	LineItems struct {
+		Edges []struct{ Node gqlLineItem } `json:"edges"`
+	} `json:"lineItems"`
+}
+
+type gqlPageInfo struct {
+	HasNextPage bool   `json:"hasNextPage"`
+	EndCursor   string `json:"endCursor"`
+}
+
+type gqlError struct {
+	Message    string `json:"message"`
+	Extensions *struct {
+		Code string `json:"code"`
+	} `json:"extensions,omitempty"`
+}
+
 type gqlResponse struct {
 	Data struct {
 		Orders struct {
-			Edges []struct {
-				Node struct {
-					Name      string `json:"name"`
-					LineItems struct {
-						Edges []struct {
-							Node struct {
-								Title        string `json:"title"`
-								VariantTitle string `json:"variantTitle"`
-								Quantity     int    `json:"quantity"`
-							} `json:"node"`
-						} `json:"edges"`
-					} `json:"lineItems"`
-				} `json:"node"`
-			} `json:"edges"`
-			PageInfo struct {
-				HasNextPage bool   `json:"hasNextPage"`
-				EndCursor   string `json:"endCursor"`
-			} `json:"pageInfo"`
+			Edges    []struct{ Node gqlOrder } `json:"edges"`
+			PageInfo gqlPageInfo               `json:"pageInfo"`
 		} `json:"orders"`
 	} `json:"data"`
-	Errors []struct {
-		Message    string `json:"message"`
-		Extensions *struct {
-			Code string `json:"code"`
-		} `json:"extensions,omitempty"`
-	} `json:"errors"`
+	Errors []gqlError `json:"errors"`
 }
 
 type Item struct {
