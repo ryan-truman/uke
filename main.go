@@ -20,33 +20,20 @@ import (
 var frontend embed.FS
 
 var (
-	tokenCacheMu sync.Mutex
-	tokenCache   = map[string]*shopify.TokenManager{}
+	clientCacheMu sync.Mutex
+	clientCache   = map[string]*shopify.Client{}
 )
 
-func getClient(shop, clientID, clientSecret string) (*shopify.Client, error) {
+func getClient(shop, clientID, clientSecret string) *shopify.Client {
 	key := shop + "\x00" + clientID
-
-	tokenCacheMu.Lock()
-	tm, ok := tokenCache[key]
-	tokenCacheMu.Unlock()
-
-	if !ok {
-		newTM := shopify.NewTokenManager(shop, clientID, clientSecret, "")
-		if err := newTM.Load(); err != nil {
-			return nil, err
-		}
-		tokenCacheMu.Lock()
-		if existing, exists := tokenCache[key]; exists {
-			tm = existing
-		} else {
-			tm = newTM
-			tokenCache[key] = tm
-		}
-		tokenCacheMu.Unlock()
+	clientCacheMu.Lock()
+	defer clientCacheMu.Unlock()
+	if c, ok := clientCache[key]; ok {
+		return c
 	}
-
-	return shopify.NewClient(shop, tm), nil
+	c := shopify.NewClient(shop, shopify.NewTokenManager(shop, clientID, clientSecret))
+	clientCache[key] = c
+	return c
 }
 
 func main() {
@@ -80,12 +67,7 @@ func ordersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := getClient(shop, clientID, clientSecret)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
-		return
-	}
-
+	client := getClient(shop, clientID, clientSecret)
 	summary, err := client.FetchSummary(r.Context(), parseDays(r))
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})

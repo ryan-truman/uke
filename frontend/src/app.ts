@@ -226,6 +226,7 @@ function baseWeightFor(title: string): number {
 }
 
 // Contents of the Drop 002 Coffee Pack — one bag of each per unit ordered.
+const DROP_002_PACK = /^drop 002 coffee pack$/i;
 const DROP_002_COFFEES = [
   'Dragon Ball - Dragonfruit honey, Colombia',
   'Chicharito - Washed Anaerobic, Mexico',
@@ -235,7 +236,7 @@ const DROP_002_COFFEES = [
 function expandPacks(items: Item[]): Item[] {
   const result: Item[] = [];
   for (const it of items) {
-    if (/^drop 002 coffee pack$/i.test(it.title)) {
+    if (DROP_002_PACK.test(it.title)) {
       for (const coffee of DROP_002_COFFEES) {
         result.push({ title: coffee, variant: it.variant, quantity: it.quantity });
       }

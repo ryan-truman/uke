@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"sync"
 	"time"
@@ -77,76 +76,40 @@ type tokenResponse struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
-type TokenData struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	ExpiresAt    time.Time `json:"expires_at"`
-}
-
 // TokenManager fetches and refreshes Shopify access tokens automatically.
-// filePath is optional — if empty, tokens are kept in memory only.
 type TokenManager struct {
 	shop         string
 	clientID     string
 	clientSecret string
-	filePath     string
-	data         *TokenData
+
 	mu           sync.Mutex
+	accessToken  string
+	refreshToken string
+	expiresAt    time.Time
 }
 
-func NewTokenManager(shop, clientID, clientSecret, filePath string) *TokenManager {
-	return &TokenManager{
-		shop:         shop,
-		clientID:     clientID,
-		clientSecret: clientSecret,
-		filePath:     filePath,
-	}
+func NewTokenManager(shop, clientID, clientSecret string) *TokenManager {
+	return &TokenManager{shop: shop, clientID: clientID, clientSecret: clientSecret}
 }
 
-// Load initialises the token manager. It reads a cached token from disk if a
-// filePath was provided and the token is still valid; otherwise it fetches a
-// fresh one via the client_credentials grant.
-func (m *TokenManager) Load() error {
-	if m.filePath != "" {
-		raw, err := os.ReadFile(m.filePath)
-		if err == nil {
-			var td TokenData
-			if json.Unmarshal(raw, &td) == nil && td.AccessToken != "" {
-				m.data = &td
-				if time.Until(td.ExpiresAt) > 5*time.Minute {
-					return nil
-				}
-				if td.RefreshToken != "" {
-					if err := m.refresh(); err == nil {
-						return nil
-					}
-				}
-			}
-		}
-	}
-	return m.fetchNew()
-}
-
-// EnsureValid returns a valid access token, refreshing if within 5 min of
-// expiry. Safe for concurrent use.
+// EnsureValid returns a valid access token, fetching one on first call and
+// refreshing when within 5 min of expiry. Safe for concurrent use.
 func (m *TokenManager) EnsureValid() (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.data == nil {
-		return "", fmt.Errorf("token manager not loaded")
+	if time.Until(m.expiresAt) >= 5*time.Minute {
+		return m.accessToken, nil
 	}
-	if time.Until(m.data.ExpiresAt) < 5*time.Minute {
-		if m.data.RefreshToken != "" {
-			if err := m.refresh(); err == nil {
-				return m.data.AccessToken, nil
-			}
-		}
-		if err := m.fetchNew(); err != nil {
-			return "", err
+	if m.refreshToken != "" {
+		if err := m.refresh(); err == nil {
+			return m.accessToken, nil
 		}
 	}
-	return m.data.AccessToken, nil
+	if err := m.fetchNew(); err != nil {
+		return "", err
+	}
+	return m.accessToken, nil
 }
 
 func (m *TokenManager) fetchNew() error {
@@ -162,15 +125,12 @@ func (m *TokenManager) refresh() error {
 		"grant_type":    {"refresh_token"},
 		"client_id":     {m.clientID},
 		"client_secret": {m.clientSecret},
-		"refresh_token": {m.data.RefreshToken},
+		"refresh_token": {m.refreshToken},
 	})
 }
 
 func (m *TokenManager) postToken(vals url.Values) error {
-	resp, err := http.PostForm(
-		fmt.Sprintf("https://%s/admin/oauth/access_token", m.shop),
-		vals,
-	)
+	resp, err := http.PostForm(fmt.Sprintf("https://%s/admin/oauth/access_token", m.shop), vals)
 	if err != nil {
 		return fmt.Errorf("shopify token: %w", err)
 	}
@@ -192,23 +152,10 @@ func (m *TokenManager) postToken(vals url.Values) error {
 	if expiresIn <= 0 {
 		expiresIn = 3600
 	}
-	m.data = &TokenData{
-		AccessToken:  tr.AccessToken,
-		RefreshToken: tr.RefreshToken,
-		ExpiresAt:    time.Now().Add(time.Duration(expiresIn) * time.Second),
-	}
-	return m.save()
-}
-
-func (m *TokenManager) save() error {
-	if m.filePath == "" {
-		return nil
-	}
-	data, err := json.MarshalIndent(m.data, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(m.filePath, data, 0600)
+	m.accessToken = tr.AccessToken
+	m.refreshToken = tr.RefreshToken
+	m.expiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
+	return nil
 }
 
 type Client struct {
