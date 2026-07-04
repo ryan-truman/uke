@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import config from './config.json';
 
 interface Credentials { shop: string; clientId: string; clientSecret: string }
 interface Item { title: string; variant: string; quantity: number }
@@ -30,6 +31,8 @@ const saveCreds = (c: Credentials) => {
   localStorage.setItem('uke_client_id', c.clientId);
   localStorage.setItem('uke_client_secret', c.clientSecret);
 };
+
+const shopDomain = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i;
 
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -76,6 +79,7 @@ function showSettings() {
           <input id="cs" type="password" placeholder="Client secret"
             value="${esc(creds?.clientSecret ?? '')}" required autocomplete="off" />
         </label>
+        <p id="form-err" class="form-error" role="alert"></p>
         <div class="settings-actions">
           ${creds ? `<button type="button" id="clr" class="btn-danger">Clear saved data</button>` : '<div></div>'}
           <button type="submit" class="btn-primary">Save &amp; load orders</button>
@@ -84,8 +88,16 @@ function showSettings() {
     </div>`;
   $('f').addEventListener('submit', e => {
     e.preventDefault();
+    // Tolerate a pasted URL: strip any protocol prefix and trailing slashes.
+    const shop = ($('s') as HTMLInputElement).value.trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '');
+    if (!shopDomain.test(shop)) {
+      $('form-err').textContent = 'Shop domain must look like my-store.myshopify.com';
+      return;
+    }
     saveCreds({
-      shop: ($('s') as HTMLInputElement).value.trim(),
+      shop,
       clientId: ($('ci') as HTMLInputElement).value.trim(),
       clientSecret: ($('cs') as HTMLInputElement).value.trim(),
     });
@@ -112,35 +124,89 @@ const settingsBtn = `<button id="b" class="btn-top btn-settings" aria-label="Set
 const refreshBtn = `<button id="rf" class="btn-top btn-refresh" aria-label="Refresh">Refresh</button>`;
 const downloadBtn = `<button id="dl" class="btn-top btn-download" aria-label="Download PDF">Download</button>`;
 
-async function download(data: Summary) {
-  const d = new Date();
-  const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// PDF dark theme, mirroring the app's palette.
+const BG: [number, number, number]        = [10, 10, 10];
+const SURFACE: [number, number, number]   = [20, 20, 20];
+const BORDER: [number, number, number]    = [42, 42, 42];
+const TEXT: [number, number, number]      = [245, 245, 245];
+const MUTED: [number, number, number]     = [138, 138, 138];
 
-  const BG: [number, number, number]        = [10, 10, 10];
-  const SURFACE: [number, number, number]   = [20, 20, 20];
-  const BORDER: [number, number, number]    = [42, 42, 42];
-  const TEXT: [number, number, number]      = [245, 245, 245];
-  const MUTED: [number, number, number]     = [138, 138, 138];
+const darkTable = {
+  styles:             { font: 'helvetica', fontSize: 10, textColor: TEXT, lineColor: BORDER, lineWidth: 0.5 },
+  headStyles:         { fillColor: SURFACE, textColor: TEXT, fontStyle: 'bold' as const },
+  bodyStyles:         { fillColor: BG, textColor: TEXT },
+  alternateRowStyles: { fillColor: BG },
+  footStyles:         { fillColor: BG, textColor: MUTED },
+};
 
-  const darkTable = {
-    styles:             { font: 'helvetica', fontSize: 10, textColor: TEXT, lineColor: BORDER, lineWidth: 0.5 },
-    headStyles:         { fillColor: SURFACE, textColor: TEXT, fontStyle: 'bold' as const },
-    bodyStyles:         { fillColor: BG, textColor: TEXT },
-    alternateRowStyles: { fillColor: BG },
-    footStyles:         { fillColor: BG, textColor: MUTED },
-  };
+const lastTableY = (doc: jsPDF) =>
+  (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
 
-  // Fetch logo as data URL
-  const logoDataUrl = await fetch('/logo.png')
+// Fetch the logo as a data URL and measure its natural dimensions.
+async function loadLogo(): Promise<{ dataUrl: string; width: number; height: number }> {
+  const dataUrl = await fetch('/logo.png')
     .then(r => r.blob())
     .then(b => new Promise<string>(resolve => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
       reader.readAsDataURL(b);
     }));
-  const logoImg = new Image();
-  logoImg.src = logoDataUrl;
-  await new Promise(r => { logoImg.onload = r; });
+  const img = new Image();
+  img.src = dataUrl;
+  await new Promise(r => { img.onload = r; });
+  return { dataUrl, width: img.naturalWidth, height: img.naturalHeight };
+}
+
+function addCoffeeTable(doc: jsPDF, items: Item[], startY: number) {
+  const pivoted = pivot(items);
+  const activeCols = grinds.map((_, i) => pivoted.some(r => r.cells[i] > 0));
+  const visibleGrinds = grinds.filter((_, i) => activeCols[i]);
+
+  autoTable(doc, {
+    ...darkTable,
+    startY,
+    head: [['Coffee', 'Total', ...visibleGrinds.map(g => g.label)]],
+    body: pivoted.map(r => [
+      r.title.split(' - ')[0],
+      String(r.total),
+      ...r.cells.filter((_, i) => activeCols[i]).map(n => n ? String(n) : ''),
+    ]),
+  });
+}
+
+function addMerchTable(doc: jsPDF, orders: Order[], startY: number) {
+  const drip = ukeDrip(orders);
+  if (drip.length === 0) return;
+  autoTable(doc, {
+    ...darkTable,
+    startY,
+    head: [['Merch', 'Size', 'Qty']],
+    body: drip.map(d => [d.title, d.size, String(d.quantity)]),
+    columnStyles: { 1: { cellWidth: 60 }, 2: { cellWidth: 40, halign: 'right' as const } },
+  });
+}
+
+function addOrdersTable(doc: jsPDF, orders: Order[], startY: number) {
+  autoTable(doc, {
+    ...darkTable,
+    startY,
+    head: [['Order', 'Products']],
+    body: orders.map(o => [
+      o.number,
+      o.items.map(i =>
+        `${i.title}${i.variant ? ' — ' + i.variant : ''}${i.quantity > 1 ? ' ×' + i.quantity : ''}`
+      ).join('\n'),
+    ]),
+    styles: { ...darkTable.styles, cellPadding: 6 },
+    columnStyles: { 0: { cellWidth: 60 } },
+  });
+}
+
+async function download(data: Summary) {
+  const d = new Date();
+  const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const logo = await loadLogo();
 
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -151,8 +217,8 @@ async function download(data: Summary) {
 
   // Logo
   const logoH = 72;
-  const logoW = (logoImg.naturalWidth / logoImg.naturalHeight) * logoH;
-  doc.addImage(logoDataUrl, 'PNG', (pageWidth - logoW) / 2, 28, logoW, logoH);
+  const logoW = (logo.width / logo.height) * logoH;
+  doc.addImage(logo.dataUrl, 'PNG', (pageWidth - logoW) / 2, 28, logoW, logoH);
 
   // "Until Victory" heading
   doc.setFont('helvetica', 'bold');
@@ -160,48 +226,9 @@ async function download(data: Summary) {
   doc.setTextColor(...TEXT);
   doc.text('Until Victory', pageWidth / 2, 28 + logoH + 20, { align: 'center' });
 
-  const pivoted = pivot(data.items);
-  const activeCols = grinds.map((_, i) => pivoted.some(r => r.cells[i] > 0));
-  const visibleGrinds = grinds.filter((_, i) => activeCols[i]);
-
-  autoTable(doc, {
-    ...darkTable,
-    startY: 28 + logoH + 40,
-    head: [['Coffee', 'Total', ...visibleGrinds.map(g => g.label)]],
-    body: pivoted.map(r => [
-      r.title.split(' - ')[0],
-      String(r.total),
-      ...r.cells.filter((_, i) => activeCols[i]).map(n => n ? String(n) : ''),
-    ]),
-  });
-
-  const drip = ukeDrip(data.orders);
-  if (drip.length > 0) {
-    autoTable(doc, {
-      ...darkTable,
-      startY: (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 24,
-      head: [['Merch', 'Size', 'Qty']],
-      body: drip.map(d => [d.title, d.size, String(d.quantity)]),
-      columnStyles: { 1: { cellWidth: 60 }, 2: { cellWidth: 40, halign: 'right' as const } },
-    });
-  }
-
-  autoTable(doc, {
-    ...darkTable,
-    startY: (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 24,
-    head: [['Order', 'Products']],
-    body: data.orders.map(o => [
-      o.number,
-      o.items.map(i =>
-        `${i.title}${i.variant ? ' — ' + i.variant : ''}${i.quantity > 1 ? ' ×' + i.quantity : ''}`
-      ).join('\n'),
-    ]),
-    styles: { ...darkTable.styles, cellPadding: 6 },
-    headStyles: darkTable.headStyles,
-    bodyStyles: darkTable.bodyStyles,
-    alternateRowStyles: darkTable.alternateRowStyles,
-    columnStyles: { 0: { cellWidth: 60 } },
-  });
+  addCoffeeTable(doc, data.items, 28 + logoH + 40);
+  addMerchTable(doc, data.orders, lastTableY(doc) + 24);
+  addOrdersTable(doc, data.orders, lastTableY(doc) + 24);
 
   doc.save(`uke-${stamp}.pdf`);
 }
@@ -213,30 +240,23 @@ function parseWeight(variant: string): number | null {
   return parseFloat(m[1]) * (m[2].toLowerCase() === 'kg' ? 1000 : 1);
 }
 
-// Per-product base bag weight overrides. Matched case-insensitively against the
-// product title. Any product not listed defaults to 200g.
-const productBaseWeights: [RegExp, number][] = [
-  [/chicharito/i, 250],
-];
-const DEFAULT_BASE_WEIGHT_G = 200;
-
+// Base bag weights and pack contents live in config.json. Weight overrides are
+// matched as case-insensitive substrings of the product title; any product not
+// listed falls back to defaultBaseWeightG.
 function baseWeightFor(title: string): number {
-  return productBaseWeights.find(([re]) => re.test(title))?.[1] ?? DEFAULT_BASE_WEIGHT_G;
+  const t = title.toLowerCase();
+  return config.baseWeights.find(w => t.includes(w.match.toLowerCase()))?.grams
+    ?? config.defaultBaseWeightG;
 }
 
-// Contents of the Drop 002 Coffee Pack — one bag of each per unit ordered.
-const DROP_002_PACK = /^drop 002 coffee pack$/i;
-const DROP_002_COFFEES = [
-  'Dragon Ball - Dragonfruit honey, Colombia',
-  'Chicharito - Washed Anaerobic, Mexico',
-  'Uke Passion - Passionfruit Honey, Colombia',
-];
-
+// Packs (config.json) are matched case-insensitively against the full line-item
+// title and expand into one bag of each of their contents per unit ordered.
 function expandPacks(items: Item[]): Item[] {
   const result: Item[] = [];
   for (const it of items) {
-    if (DROP_002_PACK.test(it.title)) {
-      for (const coffee of DROP_002_COFFEES) {
+    const pack = config.packs.find(p => p.title.toLowerCase() === it.title.trim().toLowerCase());
+    if (pack) {
+      for (const coffee of pack.contents) {
         result.push({ title: coffee, variant: it.variant, quantity: it.quantity });
       }
     } else {

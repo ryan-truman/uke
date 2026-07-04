@@ -24,6 +24,55 @@ const mockSummary = {
   orderCount: 2,
 };
 
+const mockPackSummary = {
+  items: [
+    { title: 'Drop 002 Coffee Pack', variant: 'Espresso', quantity: 2 },
+    { title: 'Drop 003 Coffee Pack', variant: 'Filter', quantity: 1 },
+  ],
+  orders: [
+    { number: '#2001', items: [{ title: 'Drop 002 Coffee Pack', variant: 'Espresso', quantity: 2 }] },
+    { number: '#2002', items: [{ title: 'Drop 003 Coffee Pack', variant: 'Filter', quantity: 1 }] },
+  ],
+  orderCount: 2,
+};
+
+test('coffee packs expand into their component coffees in the summary', async ({ page }) => {
+  await page.route('/api/orders', route => route.fulfill({ json: mockPackSummary }));
+
+  await page.addInitScript(() => {
+    localStorage.setItem('uke_shop', 'test.myshopify.com');
+    localStorage.setItem('uke_client_id', 'test-client-id');
+    localStorage.setItem('uke_client_secret', 'test-secret');
+  });
+
+  await page.goto('/');
+  await expect(page.locator('#dl')).toBeVisible();
+
+  // The coffee summary lists every component coffee from both packs…
+  const summaryTable = page.locator('.card').first().locator('table tbody');
+  for (const coffee of ['Dragon Ball', 'Chicharito', 'Uke Passion', 'Victory', 'Legacy', 'Katana']) {
+    await expect(summaryTable).toContainText(coffee);
+  }
+  // …but never the pack line item itself.
+  await expect(summaryTable).not.toContainText('Coffee Pack');
+
+  // Each Drop 002 coffee inherits the pack quantity of 2.
+  const dragonBallRow = summaryTable.locator('tr', { hasText: 'Dragon Ball' });
+  await expect(dragonBallRow.locator('td.total')).toHaveText('2');
+});
+
+test('invalid shop domain shows an inline error and does not save', async ({ page }) => {
+  await page.goto('/');
+
+  await page.fill('#s', 'not-a-shop.example.com');
+  await page.fill('#ci', 'test-client-id');
+  await page.fill('#cs', 'test-secret');
+  await page.click('button[type=submit]');
+
+  await expect(page.locator('#form-err')).toHaveText(/myshopify\.com/);
+  expect(await page.evaluate(() => localStorage.getItem('uke_shop'))).toBeNull();
+});
+
 test('summary page matches screenshot', async ({ page }) => {
   await page.route('/api/orders', route => route.fulfill({ json: mockSummary }));
 

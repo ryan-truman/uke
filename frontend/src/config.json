@@ -1,0 +1,26 @@
+{
+  "defaultBaseWeightG": 200,
+  "baseWeights": [
+    { "match": "Chicharito", "grams": 250 },
+    { "match": "Legacy", "grams": 250 },
+    { "match": "Katana", "grams": 250 }
+  ],
+  "packs": [
+    {
+      "title": "Drop 002 Coffee Pack",
+      "contents": [
+        "Dragon Ball - Dragonfruit honey, Colombia",
+        "Chicharito - Washed Anaerobic, Mexico",
+        "Uke Passion - Passionfruit Honey, Colombia"
+      ]
+    },
+    {
+      "title": "Drop 003 Coffee Pack",
+      "contents": [
+        "Victory - Natural, Yemen",
+        "Legacy - Natural, Ethiopia",
+        "Katana - Washed, Kenya"
+      ]
+    }
+  ]
+}
