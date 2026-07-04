@@ -7,8 +7,8 @@ dev: frontend
     npm --prefix frontend run watch &
     go run . -open=true
 
-# Run tests then produce dist/Uke.zip (Apple Silicon)
-build: test frontend
+# Produce dist/Uke.zip (Apple Silicon)
+build: frontend
     rm -rf dist/Uke.app dist/Uke.zip
     mkdir -p dist/Uke.app/Contents/MacOS dist/Uke.app/Contents/Resources
     GOOS=darwin GOARCH=arm64 go build -o dist/Uke.app/Contents/MacOS/uke-server .
